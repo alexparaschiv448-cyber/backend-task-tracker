@@ -1,15 +1,26 @@
 from typing import Literal,Annotated
-from fastapi import FastAPI,Query,Path,Header,Cookie,Body
+from fastapi import FastAPI,Query,Path,Header,Cookie,Body, HTTPException
 from pydantic import BaseModel,Field
 import jwt
 from datetime import datetime,date
 import time
+from sqlalchemy import create_engine,text
+from sqlalchemy.orm import Session
+
+engine = create_engine(
+    "postgresql+psycopg2://dev:dev@localhost:5432/dev"
+)
+
 
 
 app = FastAPI()
 users=[]
 tasks=[]
 projects=[]
+
+class Test(BaseModel):
+    name: str = Field(min_length=1,max_length=20,description="Name")
+    description: str | None = Field(None,min_length=1,max_length=20,description="Description")
 
 class User(BaseModel):
     id:int
@@ -59,6 +70,18 @@ def CheckCircular(child,parent):
 @app.get("/")
 async def root():
     return {"message": "Hello World"}
+@app.get("/conn")
+async def conn():
+    test = {}
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT * from test"))
+        count = 0
+        for row in result:
+            test[count] = {"id": row.id, "name": row.name, "description": row.description}
+            count += 1
+    return {"message": test}
+
+
 @app.get("/all")
 async def show():
     response=[]
@@ -81,6 +104,16 @@ async def create_user(user: User):
     user.createdAt = datetime.now()
     users.append(user)
     return user
+
+@app.post("/test")
+async def test(test: Test):
+    with engine.connect() as conn:
+        if test.description is not None:
+            conn.execute(text(f"insert into test(name,description) values('{test.name}','{test.description}')"))
+        else:
+            conn.execute(text(f"insert into test(name) values('{test.name}')"))
+        conn.commit()
+    return "done"
 
 @app.post("/create_project")
 async def create_project(project: Project):
