@@ -6,6 +6,7 @@ from datetime import datetime,date
 import time
 from sqlalchemy import create_engine,text
 from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 
 engine = create_engine(
     "postgresql+psycopg2://dev:dev@localhost:5432/dev"
@@ -17,6 +18,18 @@ app = FastAPI()
 users=[]
 tasks=[]
 projects=[]
+
+origins = [
+    "http://localhost:5122",  # your React app
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,        # or ["*"] for all (dev only)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Test(BaseModel):
     name: str = Field(min_length=1,max_length=20,description="Name")
