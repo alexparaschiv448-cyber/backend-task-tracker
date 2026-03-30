@@ -7,6 +7,7 @@ import time
 from sqlalchemy import create_engine,text
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+import hashlib
 
 engine = create_engine(
     "postgresql+psycopg2://dev:dev@localhost:5432/dev"
@@ -18,6 +19,8 @@ app = FastAPI()
 users=[]
 tasks=[]
 projects=[]
+salt="5ga23fdkh354"
+
 
 origins = [
     "http://localhost:5122",  # your React app
@@ -36,12 +39,10 @@ class Test(BaseModel):
     description: str | None = Field(None,min_length=1,max_length=20,description="Description")
 
 class User(BaseModel):
-    id:int
     firstName: str = Field(min_length=1,max_length=30,description="First Name")
     lastName: str = Field(min_length=1,max_length=30,description="Last Name")
     email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
     passwordHash:str = Field(min_length=1,max_length=100,description="Password Hash")
-    createdAt: datetime = Field(default_factory=datetime.now)
 
 class Project(BaseModel):
     id:int
@@ -93,6 +94,16 @@ async def conn():
             test[count] = {"id": row.id, "name": row.name, "description": row.description}
             count += 1
     return {"message": test}
+@app.get("/checkemail/{email}")
+async def checkemail(email: Annotated[str,Path()]):
+    test = {}
+    with engine.connect() as conn:
+        result = conn.execute(text(f"SELECT email from users where email = '{email}'"))
+        count = 0
+        for row in result:
+            test[count] = {"email":row.email}
+            count += 1
+    return {"message": test}
 
 
 @app.get("/all")
@@ -114,9 +125,17 @@ async def show():
 
 @app.post("/create_user")
 async def create_user(user: User):
-    user.createdAt = datetime.now()
     users.append(user)
     return user
+@app.post("/auth/register")
+async def create_user(user: User):
+    #users.append(user)
+    final_pass=hashlib.sha256((salt+str(user.passwordHash)).encode('utf-8')).hexdigest()
+    user.passwordHash = final_pass
+    with engine.connect() as conn:
+        conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
+        conn.commit()
+    return "done"
 
 @app.post("/test")
 async def test(test: Test):
