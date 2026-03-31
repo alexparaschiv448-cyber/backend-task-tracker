@@ -1,13 +1,16 @@
 from typing import Literal,Annotated
 from fastapi import FastAPI,Query,Path,Header,Cookie,Body, HTTPException
 from pydantic import BaseModel,Field
-import jwt
-from datetime import datetime,date
+from datetime import datetime,date, timedelta,timezone
 import time
 from sqlalchemy import create_engine,text
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 import hashlib
+import jwt
+
 
 engine = create_engine(
     "postgresql+psycopg2://dev:dev@localhost:5432/dev"
@@ -63,6 +66,17 @@ class Task(BaseModel):
     projectId:int
     createdBy: str = Field(min_length=1,max_length=30,description="Created By User")
 
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
+    password:str = Field(min_length=1,max_length=100,description="Password Hash")
+
+class LoginResponse(BaseModel):
+    firstname: str = Field(min_length=1,max_length=30,description="First Name")
+    lastname: str = Field(min_length=1,max_length=30,description="Last Name")
+    email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
+    token:str = Field(min_length=1,max_length=256,description="JWT Token")
+
+
 def CheckCircular(child,parent):
     circular=False
     ids=[]
@@ -80,7 +94,58 @@ def CheckCircular(child,parent):
     if parent!=None:
         circular=True
     return circular
+SECRET_KEY = "d2h4j5jn7jbjksadJNA9r3"
+ALGORITHM = "HS256"
 
+
+def create_jwt(data: dict):
+    payload = data.copy()
+    payload["exp"] = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    response=LoginResponse(firstname=data['firstname'],lastname=data['lastname'],email=data['email'],token=token)
+    return response
+
+def verify_jwt(authorization: str):
+    token = authorization.split(" ")[1]
+
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+    return payload
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if request.url.path in ["/auth/login", "/auth/register","/openapi.json"]:
+        return await call_next(request)
+    if request.url.path.startswith("/checkemail/",):
+        return await call_next(request)
+    if request.url.path.startswith("/docs",):
+        return await call_next(request)
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        response = JSONResponse({"detail": "No auth header"}, status_code=401)
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+    try:
+        payload = verify_jwt(auth_header)
+        request.state.user = payload  # optional: store for later use
+    except jwt.ExpiredSignatureError:
+        response=JSONResponse({"detail": "Token Expired"}, status_code=401)
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+    except jwt.InvalidTokenError:
+        response = JSONResponse({"detail": "Invalid token"}, status_code=401)
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+    return await call_next(request)
 @app.get("/")
 async def root():
     return {"message": "Hello World"}
@@ -135,6 +200,25 @@ async def create_user(user: User):
     with engine.connect() as conn:
         conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
         conn.commit()
+    return "done"
+@app.post("/auth/login")
+async def create_user(login:Annotated[LoginRequest,Body()]):
+    final_pass = hashlib.sha256((salt + str(login.password)).encode('utf-8')).hexdigest()
+    #user.passwordHash = final_pass
+    firstname='';
+    lastname='';
+    with engine.connect() as conn:
+        result = conn.execute(text(f"SELECT firstName,lastName from users where email = '{login.email}' and passwordHash = '{final_pass}'"))
+        count=0
+        for row in result:
+            firstname=row[0]
+            lastname=row[1]
+            count+=1
+        if count>0:
+            return create_jwt({"firstname":firstname,"lastname":lastname,"email":login.email})
+        else:
+            return "error"
+
     return "done"
 
 @app.post("/test")
