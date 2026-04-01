@@ -76,6 +76,11 @@ class LoginResponse(BaseModel):
     email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
     token:str = Field(min_length=1,max_length=256,description="JWT Token")
 
+class AuthCheck(BaseModel):
+    name: str = Field(min_length=1,max_length=61,description="Full Name")
+    email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
+    authorization:str = Field(min_length=1,max_length=256,description="JWT Token")
+
 
 def CheckCircular(child,parent):
     circular=False
@@ -107,11 +112,14 @@ def create_jwt(data: dict):
     return response
 
 def verify_jwt(authorization: str):
-    token = authorization.split(" ")[1]
+    try:
+        token = authorization.split(" ")[1]
 
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
 
-    return payload
+        return payload
+    except:
+        return {"error":"Invalid token!"}
 
 
 @app.middleware("http")
@@ -200,7 +208,7 @@ async def create_user(user: User):
     with engine.connect() as conn:
         conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
         conn.commit()
-    return "done"
+    return create_jwt({"firstname":user.firstName,"lastname":user.lastName,"email":user.email})
 @app.post("/auth/login")
 async def create_user(login:Annotated[LoginRequest,Body()]):
     final_pass = hashlib.sha256((salt + str(login.password)).encode('utf-8')).hexdigest()
@@ -217,9 +225,24 @@ async def create_user(login:Annotated[LoginRequest,Body()]):
         if count>0:
             return create_jwt({"firstname":firstname,"lastname":lastname,"email":login.email})
         else:
-            return "error"
+            return {"message":"Invalid credentials"}
 
-    return "done"
+@app.post("/auth/check")
+async def check_auth(check:Annotated[AuthCheck,Body()]):
+    payload = verify_jwt("Bearer "+check.authorization)
+    print(payload)
+    if "error" not in payload.keys():
+        firstname=payload["firstname"]
+        lastname=payload["lastname"]
+        email=payload["email"]
+        if firstname==check.name.split(" ")[0] and lastname==check.name.split(" ")[1] and email==check.email:
+            return payload
+        else:
+            return {"message":"Invalid credentials"}
+    else:
+        return {"message":"Invalid token"}
+
+
 
 @app.post("/test")
 async def test(test: Test):
