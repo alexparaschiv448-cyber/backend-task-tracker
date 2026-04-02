@@ -6,7 +6,7 @@ import time
 from sqlalchemy import create_engine,text
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 import hashlib
 import jwt
@@ -77,8 +77,6 @@ class LoginResponse(BaseModel):
     token:str = Field(min_length=1,max_length=256,description="JWT Token")
 
 class AuthCheck(BaseModel):
-    name: str = Field(min_length=1,max_length=61,description="Full Name")
-    email: str = Field(min_length=1,max_length=30,description="Email Address",pattern=r"^[^@]+@[^@]+$")
     authorization:str = Field(min_length=1,max_length=256,description="JWT Token")
 
 
@@ -109,6 +107,8 @@ def create_jwt(data: dict):
 
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
     response=LoginResponse(firstname=data['firstname'],lastname=data['lastname'],email=data['email'],token=token)
+    print("Raspuns!!!")
+    print(response)
     return response
 
 def verify_jwt(authorization: str):
@@ -227,20 +227,15 @@ async def create_user(login:Annotated[LoginRequest,Body()]):
         else:
             return {"message":"Invalid credentials"}
 
-@app.post("/auth/check")
-async def check_auth(check:Annotated[AuthCheck,Body()]):
+@app.post("/me")
+async def check_auth(check:Annotated[AuthCheck,Body()],response: Response):
     payload = verify_jwt("Bearer "+check.authorization)
     print(payload)
     if "error" not in payload.keys():
-        firstname=payload["firstname"]
-        lastname=payload["lastname"]
-        email=payload["email"]
-        if firstname==check.name.split(" ")[0] and lastname==check.name.split(" ")[1] and email==check.email:
-            return payload
-        else:
-            return {"message":"Invalid credentials"}
+        return payload
     else:
-        return {"message":"Invalid token"}
+        response.status_code=401
+        return {"message":"Invalid token"} #status code return
 
 
 
