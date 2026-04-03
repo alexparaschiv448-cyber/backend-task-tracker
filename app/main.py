@@ -124,6 +124,7 @@ def verify_jwt(authorization: str):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    #print("Middleware called")
     if request.method == "OPTIONS":
         return await call_next(request)
     if request.url.path in ["/auth/login", "/auth/register","/openapi.json"]:
@@ -132,27 +133,29 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     if request.url.path.startswith("/docs",):
         return await call_next(request)
+    #print("Middleware passed")
+    payload=""
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         response = JSONResponse({"detail": "No auth header"}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
         response.headers["Access-Control-Allow-Credentials"] = "true"
+        #print("INVALIDDD")
         return response
-
-    try:
-        payload = verify_jwt(auth_header)
-        request.state.user = payload  # optional: store for later use
-    except jwt.ExpiredSignatureError:
+    payload = verify_jwt(auth_header)
+    #request.state.user = payload  # optional: store for later use
+    if "error" in payload.keys():
+        #print("INVALID")
         response=JSONResponse({"detail": "Token Expired"}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
-    except jwt.InvalidTokenError:
-        response = JSONResponse({"detail": "Invalid token"}, status_code=401)
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        return response
-
+    #except jwt.InvalidTokenError:
+    #    response = JSONResponse({"detail": "Invalid token"}, status_code=401)
+    #    response.headers["Access-Control-Allow-Origin"] = "http://localhost:5122"
+    #    response.headers["Access-Control-Allow-Credentials"] = "true"
+    #    return response
+    #print("middleware finished")
     return await call_next(request)
 @app.get("/")
 async def root():
