@@ -3,7 +3,7 @@ from fastapi import Path,Body
 from datetime import datetime
 from sqlalchemy import create_engine,text
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Header
 from fastapi.responses import JSONResponse
 import hashlib
 from dotenv import load_dotenv
@@ -14,6 +14,10 @@ from .models.User import User
 from .models.Task import Task
 from .models.Project import Project
 from .utils.auth import verifyJWT,createJWT
+from .models.UpdateUserRequest import UpdateUserRequest
+import json
+
+expired_tokens=[]
 
 load_dotenv()
 
@@ -92,6 +96,12 @@ async def auth_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
+    if auth_header in expired_tokens:
+        response = JSONResponse({"detail": "Token Expired"}, status_code=401)
+        response.headers["Access-Control-Allow-Origin"] = frontend_url
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        print("YEEEEEEEEEEES")
+        return response
     return await call_next(request)
 
 
@@ -161,12 +171,16 @@ async def create_user(user: User):
 async def create_user(user: User):
     final_pass=hashlib.sha256((salt+str(user.passwordHash)).encode('utf-8')).hexdigest()
     user.passwordHash = final_pass
+    id=''
+    createdat=''
     with engine.connect() as conn:
         conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
         conn.commit()
-
-
-    return createJWT({"firstname":user.firstName,"lastname":user.lastName,"email":user.email})
+        result=conn.execute(text(f"SELECT id,createdAt from users where email = '{user.email}'"))
+        for row in result:
+            id=row[0]
+            createdat=row[1]
+    return createJWT({"id":id,"createdat":createdat, "firstname":user.firstName,"lastname":user.lastName,"email":user.email})
 
 
 
@@ -174,22 +188,26 @@ async def create_user(user: User):
 @app.post("/auth/login")
 async def create_user(login:Annotated[LoginRequest,Body()]):
     final_pass = hashlib.sha256((salt + str(login.password)).encode('utf-8')).hexdigest()
-    firstname='';
-    lastname='';
+    firstname=''
+    lastname=''
+    id=''
+    createdat=''
     with engine.connect() as conn:
-        result = conn.execute(text(f"SELECT firstName,lastName from users where email = '{login.email}' and passwordHash = '{final_pass}'"))
+        result = conn.execute(text(f"SELECT firstName,lastName,id,createdAt from users where email = '{login.email}' and passwordHash = '{final_pass}'"))
         count=0
         for row in result:
             firstname=row[0]
             lastname=row[1]
+            id=row[2]
+            createdat=row[3]
             count+=1
         if count>0:
 
-            return createJWT({"firstname":firstname,"lastname":lastname,"email":login.email})
-
-
+            return createJWT({"id":id,"createdat":createdat, "firstname":firstname,"lastname":lastname,"email":login.email})
         else:
             return {"message":"Invalid credentials"}
+
+
 
 
 
@@ -205,11 +223,61 @@ async def check_auth(check:Annotated[AuthCheck,Body()],response: Response):
 
 
 
+@app.put("/users/{id}")
+async def update_user(user:Annotated[UpdateUserRequest,Body()],id:Annotated[int,Path()],request:Request,response: Response):
+    authorization=request.headers.get("Authorization")
+    print("Auth: ",authorization)
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        print(id,payload["id"])
+        if id!=payload["id"]:
+            response.status_code = 401
+            return {"message":"Invalid user id!"}
+        else:
+            createdat = ''
+            with engine.connect() as conn:
+                result = conn.execute(text(f"SELECT createdAt from users where email = '{payload['email']}'"))
+                for row in result:
+                    createdat = row[0]
+                conn.execute(text(f"update users set firstName = '{user.firstname}',lastName='{user.lastname}', email='{user.email}' where id = {id}"))
+                conn.commit()
+            expired_tokens.append(authorization)
+            return createJWT({"id":id,"createdat":createdat, "firstname":user.firstname,"lastname":user.lastname,"email":user.email})
+    else:
+        response.status_code=401
+        return {"message":"Invalid token"}
+
+@app.delete("/users/{id}")
+async def delete_user(id:Annotated[int,Path()],request:Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    print("Auth: ", authorization)
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        print(id,payload["id"])
+        if id!=payload["id"]:
+            response.status_code = 401
+            return {"message":"Invalid user id!"}
+        else:
+            expired_tokens.append(authorization)
+            with engine.connect() as conn:
+                conn.execute(text(f"delete from users where id = {id}"))
+                conn.commit()
+            response.status_code = 200
+            return {"message": "User deleted!"}
+    else:
+        response.status_code=401
+        return {"message":"Invalid token"}
+
+
 @app.post("/create_project")
 async def create_project(project: Project):
     project.createdAt = datetime.now()
     projects.append(project)
     return project
+
+
+
+
 
 
 

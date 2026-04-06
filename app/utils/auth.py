@@ -9,11 +9,11 @@ load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 
 def createJWT(data: dict):
-
+    data['createdat'] = data['createdat'].strftime("%Y-%m-%d %H:%M:%S")
     payload = data.copy()
     payload["exp"] = datetime.now(timezone.utc) + timedelta(minutes=30)
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-    response=LoginResponse(firstname=data['firstname'],lastname=data['lastname'],email=data['email'],token=token)
+    response=LoginResponse(id=data['id'],createdat=data['createdat'],firstname=data['firstname'],lastname=data['lastname'],email=data['email'],token=token)
     return response
 
 
