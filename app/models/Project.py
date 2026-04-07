@@ -4,9 +4,7 @@ from datetime import datetime
 
 
 class Project(BaseModel):
-    id:int
-    name: str = Field(min_length=1,max_length=30,description="Project Name")
-    description: str = Field(min_length=1,max_length=30,description="Project Description")
+    name: str = Field(min_length=1,max_length=50,description="Project Name")
+    description: str = Field(min_length=1,max_length=1000,description="Project Description")
     status: Literal["New", "In Progress", "Done"] = "New"
-    ownerId:int
     createdAt: datetime = Field(default_factory=datetime.now)
