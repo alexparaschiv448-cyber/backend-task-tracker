@@ -300,7 +300,7 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
     payload = verifyJWT(authorization)
     if "error" not in payload.keys():
         count=0
-        sql="select * from projects where "
+        sql="select t.*, COUNT(*) OVER() AS total_count from(select * from projects where "
         if 'name' in query.model_fields_set:
             sql+=f"name LIKE '%{query.name}%' "
             count+=1
@@ -313,12 +313,13 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
             sql+=f"and ownerid={payload['id']} "
         else:
             sql+=f"ownerId={payload['id']} "
-        sql+=f"order by createdat {query.order} LIMIT {query.limit} OFFSET {query.offset}"
+        sql+=f") t order by createdat {query.order} LIMIT {query.limit} OFFSET {query.offset}"
         projects_list = []
+        print(sql)
         with engine.connect() as conn:
             result = conn.execute(text(sql))
             for row in result:
-                projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat})
+                projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count})
         response.status_code = 200
         return {"projects": projects_list}
 
