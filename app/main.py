@@ -269,11 +269,6 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         return {"message":"Invalid token"}
 
 
-#@app.post("/create_project")
-#async def create_project(project: Project):
-#    project.createdAt = datetime.now()
-#    projects.append(project)
-    return project
 
 
 @app.post("/projects")
@@ -281,8 +276,6 @@ async def create_project(project:Annotated[Project, Body()],request:Request,resp
     authorization=request.headers.get("Authorization")
     payload = verifyJWT(authorization)
     if "error" not in payload.keys():
-        if "description" not in project.model_fields_set:
-            print("Yess")
         with engine.connect() as conn:
             conn.execute(text(f"insert into projects(name,description,status,ownerId) values('{project.name}','{project.description}','{project.status}',{payload['id']})"))
             conn.commit()
@@ -321,7 +314,7 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
             for row in result:
                 projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count})
         response.status_code = 200
-        return {"projects": projects_list}
+        return projects_list
 
 
     else:
