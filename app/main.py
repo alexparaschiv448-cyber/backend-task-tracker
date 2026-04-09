@@ -260,6 +260,7 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         else:
             expired_tokens.append(authorization)
             with engine.connect() as conn:
+                conn.execute(text(f"delete from projects where ownerid = {id}"))
                 conn.execute(text(f"delete from users where id = {id}"))
                 conn.commit()
             response.status_code = 200
@@ -312,7 +313,7 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
         with engine.connect() as conn:
             result = conn.execute(text(sql))
             for row in result:
-                projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count})
+                projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count,"id":row.id})
         response.status_code = 200
         return projects_list
 
@@ -320,6 +321,72 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
     else:
         response.status_code = 401
         return {"message": "Invalid token"}
+
+
+
+@app.get("/projects/{id}")
+async def get_project(id:Annotated[int,Path()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        project={}
+        count = 0
+        with engine.connect() as conn:
+            result = conn.execute(text(f"SELECT name,description,createdat,status,ownerid from projects where id = '{id}'"))
+            for row in result:
+                if row.ownerid!=payload["id"]:
+                    response.status_code = 401
+                    return {"message":"Unauthorized access!"}
+                else:
+                    project = {"name": row.name, "description": row.description, "createdat": row.createdat,"status": row.status}
+                    count+=1
+        if count>0:
+            print(project)
+            response.status_code = 200
+            return project
+        else:
+            response.status_code = 404
+            return {"message":"Project not found!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
+
+@app.put("/projects/{id}")
+async def update_project(id:Annotated[int,Path()],request: Request,response: Response,project:Annotated[Project,Body()]):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"update projects set name = '{project.name}',description='{project.description}', status='{project.status}' where id = {id} and ownerid = {payload['id']}"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Project updated!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
+
+@app.delete("/projects/{id}")
+async def delete_project(id:Annotated[int,Path()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"delete from projects where id = {id} and ownerid = {payload['id']}"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Project deleted!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
 
 
 @app.post("/create_task")
