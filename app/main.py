@@ -388,12 +388,19 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
         return {"message": "Invalid token"}
 
 
+@app.post("/tasks")
+async def create_task(task:Annotated[Task, Body()],request:Request,response: Response):
+    authorization=request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"INSERT INTO tasks (title, description, priority, status, dueDate, projectId, createdBy,parentId) VALUES ('{task.title}','{task.description}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']},{task.parentId})"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "task created!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
 
 
 
-@app.post("/create_task")
-async def create_task(task: Task):
-    if task.parentId is not None and CheckCircular(task.id,task.parentId) == True:
-        return "Invalid parent"
-    tasks.append(task)
-    return task
