@@ -127,7 +127,7 @@ async def conn():
 
 
 @app.get("/checkemail/{email}")
-async def checkemail(email: Annotated[str,Path()]):
+async def checkemail(email: Annotated[str,Path(pattern = r"^[^\s@]+@[^\s@]+$")]):
     with engine.connect() as conn:
         result = conn.execute(text(f"SELECT email from users where email = '{email}'"))
         count = 0
@@ -174,9 +174,9 @@ async def create_user(user: User):
     id=''
     createdat=''
     with engine.connect() as conn:
-        conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
+        conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}') ON CONFLICT (email) DO NOTHING"))
         conn.commit()
-        result=conn.execute(text(f"SELECT id,createdAt from users where email = '{user.email}'"))
+        result=conn.execute(text(f"SELECT id,createdAt from users where email = '{user.email}' and passwordHash='{user.passwordHash}'"))
         for row in result:
             id=row[0]
             createdat=row[1]
@@ -239,8 +239,10 @@ async def update_user(user:Annotated[UpdateUserRequest,Body()],id:Annotated[int,
                 result = conn.execute(text(f"SELECT createdAt from users where email = '{payload['email']}'"))
                 for row in result:
                     createdat = row[0]
-                conn.execute(text(f"update users set firstName = '{user.firstname}',lastName='{user.lastname}', email='{user.email}' where id = {id}"))
+                conn.execute(text(f"update users set firstName = '{user.firstname}',lastName='{user.lastname}', email='{user.email}' where id = {id} AND ((SELECT COUNT(*)FROM users u2 WHERE u2.email = '{user.email}') = 0 OR email ='{user.email}')"))
                 conn.commit()
+            if createdat=="":
+                createdat=datetime.now()
             expired_tokens.append(authorization)
             return createJWT({"id":id,"createdat":createdat, "firstname":user.firstname,"lastname":user.lastname,"email":user.email})
     else:
