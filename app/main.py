@@ -392,12 +392,26 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
 async def create_task(task:Annotated[Task, Body()],request:Request,response: Response):
     authorization=request.headers.get("Authorization")
     payload = verifyJWT(authorization)
+    sql=""
+    if "description" in task.model_fields_set:
+        sql=f"INSERT INTO tasks (title, description, priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.description}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
+    else:
+        sql=f"INSERT INTO tasks (title,  priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
+    count=0
     if "error" not in payload.keys():
         with engine.connect() as conn:
-            conn.execute(text(f"INSERT INTO tasks (title, description, priority, status, dueDate, projectId, createdBy,parentId) VALUES ('{task.title}','{task.description}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']},{task.parentId})"))
-            conn.commit()
-        response.status_code = 200
-        return {"message": "task created!"}
+            result = conn.execute(text(f"SELECT name from projects where id = '{task.projectId}' and ownerid = {payload['id']}"))
+            for row in result:
+                count=1
+        if count>0:
+            with engine.connect() as conn:
+                conn.execute(text(sql))
+                conn.commit()
+            response.status_code = 200
+            return {"message": "task created!"}
+        else:
+            response.status_code = 401
+            return {"message": "Unauthorized request!"}
     else:
         response.status_code = 401
         return {"message": "Invalid token"}
