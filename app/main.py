@@ -16,6 +16,7 @@ from .models.Project import Project
 from .utils.auth import verifyJWT,createJWT
 from .models.UpdateUserRequest import UpdateUserRequest
 from .models.GetProjects import GetProjects
+from .models.GetTasks import GetTasks
 import json
 
 expired_tokens=[]
@@ -318,8 +319,6 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
                 projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count,"id":row.id})
         response.status_code = 200
         return projects_list
-
-
     else:
         response.status_code = 401
         return {"message": "Invalid token"}
@@ -409,6 +408,53 @@ async def create_task(task:Annotated[Task, Body()],request:Request,response: Res
                 conn.commit()
             response.status_code = 200
             return {"message": "task created!"}
+        else:
+            response.status_code = 401
+            return {"message": "Unauthorized request!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+@app.get("/tasks")
+async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request: Request):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        count=0
+        with engine.connect() as conn:
+            result=conn.execute(text(f"select * from projects where id = {query.projectId} and ownerid = {payload['id']}"))
+            for row in result:
+                count=1
+        if count>0:
+            count=0
+            sql="select t.*, COUNT(*) OVER() AS total_count from(select * from tasks where "
+            if 'title' in query.model_fields_set:
+                sql+=f"title LIKE '%{query.title}%' "
+                count+=1
+            if 'status' in query.model_fields_set and count>0:
+                sql+=f" and status='{query.status}' "
+            elif 'status' in query.model_fields_set and count==0:
+                sql+=f"status='{query.status}' "
+                count+=1
+            if 'priority' in query.model_fields_set and count>0:
+                sql+=f" and priority='{query.priority}' "
+            elif 'priority' in query.model_fields_set and count==0:
+                sql+=f"priority='{query.priority}' "
+                count+=1
+            if count>0:
+                sql+=f"and projectId={query.projectId} "
+            else:
+                sql+=f"projectId={query.projectId} "
+            sql+=f") t order by dueDate {query.order} LIMIT {query.limit} OFFSET {query.offset}"
+            tasks_list = []
+            print(sql)
+            with engine.connect() as conn:
+                result = conn.execute(text(sql))
+                for row in result:
+                    tasks_list.append({"title":row.title,"description":row.description,"status":row.status,"priority":row.priority,"duedate":row.duedate,"limit":row.total_count,"id":row.id})
+            response.status_code = 200
+            return tasks_list
         else:
             response.status_code = 401
             return {"message": "Unauthorized request!"}
