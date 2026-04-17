@@ -452,7 +452,7 @@ async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request
             with engine.connect() as conn:
                 result = conn.execute(text(sql))
                 for row in result:
-                    tasks_list.append({"title":row.title,"description":row.description,"status":row.status,"priority":row.priority,"duedate":row.duedate,"limit":row.total_count,"id":row.id})
+                    tasks_list.append({"title":row.title,"description":row.description,"status":row.status,"priority":row.priority,"duedate":row.duedate,"limit":row.total_count,"id":row.id,"projectid":row.projectid})
             response.status_code = 200
             return tasks_list
         else:
@@ -463,4 +463,76 @@ async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request
         return {"message": "Invalid token"}
 
 
+@app.get("/tasks/{id}")
+async def get_task(id:Annotated[int,Path()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        task={}
+        count = 0
+        with engine.connect() as conn:
+            result = conn.execute(text(f"select t.*,(select distinct e.title from tasks e where id=t.parentid) as parent_title from tasks t where id={id} and (select count(*) from projects where id=t.projectid and ownerid={payload['id']})=1"))
+            for row in result:
+                task = {"title": row.title, "description": row.description, "duedate": row.duedate,"status": row.status,"priority": row.priority,"parentname": row.parent_title,"parentid":row.parentid}
+                count+=1
+        if count>0:
+            print(task)
+            response.status_code = 200
+            return task
+        else:
+            response.status_code = 401
+            return {"message":"Unauthorized access!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
 
+@app.get("/search/parent/{id}")
+async def search_parent(id:Annotated[int,Path()],projectid:Annotated[int,Query()],title:Annotated[str,Query()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        tasks=[]
+        count=0
+        with engine.connect() as conn:
+            sql=f"select title,id from tasks where id!={id} and projectid={projectid} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1 and title like '%{title}%' limit 5 offset 0"
+            print(sql)
+            result = conn.execute(text(sql))
+            for row in result:
+                tasks.append({"title":row.title,"id":row.id})
+                count=1
+        if count>0:
+            response.status_code=200
+            return tasks
+        else:
+            response.status_code=404
+            return {"message":"No tasks found!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+@app.put("/tasks/{id}")
+async def update_task(id:Annotated[int,Path()],request: Request,response: Response,task:Annotated[Task,Body()]):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        sql=f"update tasks set title = '{task.title}', status='{task.status}', priority='{task.priority}', duedate='{task.dueDate}'"
+        if "description" in task.model_fields_set and task.description:
+            sql+=f",description = '{task.description}'"
+        else:
+            sql += f",description = null"
+        if "parentId" in task.model_fields_set and task.parentId:
+            print("YESSS")
+            sql+=f",parentid = {task.parentId}"
+        else:
+            sql+=f",parentid = null"
+        sql+=f" where id = {id} and (select count(*) from projects where id={task.projectId} and ownerid={payload['id']})=1"
+        print(sql)
+        with engine.connect() as conn:
+            conn.execute(text(sql))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Task updated!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
