@@ -3,7 +3,7 @@ from fastapi import Path,Body
 from datetime import datetime
 from sqlalchemy import create_engine,text
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Request, Response, Header
+from fastapi import FastAPI, Request, Response, Header,Query
 from fastapi.responses import JSONResponse
 import hashlib
 from dotenv import load_dotenv
@@ -15,6 +15,8 @@ from .models.Task import Task
 from .models.Project import Project
 from .utils.auth import verifyJWT,createJWT
 from .models.UpdateUserRequest import UpdateUserRequest
+from .models.GetProjects import GetProjects
+from .models.GetTasks import GetTasks
 import json
 
 expired_tokens=[]
@@ -100,7 +102,6 @@ async def auth_middleware(request: Request, call_next):
         response = JSONResponse({"detail": "Token Expired"}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        print("YEEEEEEEEEEES")
         return response
     return await call_next(request)
 
@@ -127,7 +128,7 @@ async def conn():
 
 
 @app.get("/checkemail/{email}")
-async def checkemail(email: Annotated[str,Path()]):
+async def checkemail(email: Annotated[str,Path(pattern = r"^[^\s@]+@[^\s@]+$")]):
     with engine.connect() as conn:
         result = conn.execute(text(f"SELECT email from users where email = '{email}'"))
         count = 0
@@ -174,9 +175,9 @@ async def create_user(user: User):
     id=''
     createdat=''
     with engine.connect() as conn:
-        conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}')"))
+        conn.execute(text(f"insert into users(firstName,lastName,email,passwordHash) values('{user.firstName}','{user.lastName}','{user.email}','{user.passwordHash}') ON CONFLICT (email) DO NOTHING"))
         conn.commit()
-        result=conn.execute(text(f"SELECT id,createdAt from users where email = '{user.email}'"))
+        result=conn.execute(text(f"SELECT id,createdAt from users where email = '{user.email}' and passwordHash='{user.passwordHash}'"))
         for row in result:
             id=row[0]
             createdat=row[1]
@@ -239,8 +240,10 @@ async def update_user(user:Annotated[UpdateUserRequest,Body()],id:Annotated[int,
                 result = conn.execute(text(f"SELECT createdAt from users where email = '{payload['email']}'"))
                 for row in result:
                     createdat = row[0]
-                conn.execute(text(f"update users set firstName = '{user.firstname}',lastName='{user.lastname}', email='{user.email}' where id = {id}"))
+                conn.execute(text(f"update users set firstName = '{user.firstname}',lastName='{user.lastname}', email='{user.email}' where id = {id} AND ((SELECT COUNT(*)FROM users u2 WHERE u2.email = '{user.email}') = 0 OR email ='{user.email}')"))
                 conn.commit()
+            if createdat=="":
+                createdat=datetime.now()
             expired_tokens.append(authorization)
             return createJWT({"id":id,"createdat":createdat, "firstname":user.firstname,"lastname":user.lastname,"email":user.email})
     else:
@@ -260,6 +263,7 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         else:
             expired_tokens.append(authorization)
             with engine.connect() as conn:
+                conn.execute(text(f"delete from projects where ownerid = {id}"))
                 conn.execute(text(f"delete from users where id = {id}"))
                 conn.commit()
             response.status_code = 200
@@ -269,21 +273,194 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         return {"message":"Invalid token"}
 
 
-@app.post("/create_project")
-async def create_project(project: Project):
-    project.createdAt = datetime.now()
-    projects.append(project)
-    return project
+
+
+@app.post("/projects")
+async def create_project(project:Annotated[Project, Body()],request:Request,response: Response):
+    authorization=request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"insert into projects(name,description,status,ownerId) values('{project.name}','{project.description}','{project.status}',{payload['id']})"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Project created!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
+@app.get("/projects")
+async def get_projects(query:Annotated[GetProjects,Query()],response: Response,request: Request):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        count=0
+        sql="select t.*, COUNT(*) OVER() AS total_count from(select * from projects where "
+        if 'name' in query.model_fields_set:
+            sql+=f"name LIKE '%{query.name}%' "
+            count+=1
+        if 'status' in query.model_fields_set and count>0:
+            sql+=f" and status='{query.status}' "
+        elif 'status' in query.model_fields_set and count==0:
+            sql+=f"status='{query.status}' "
+            count+=1
+        if count>0:
+            sql+=f"and ownerid={payload['id']} "
+        else:
+            sql+=f"ownerId={payload['id']} "
+        sql+=f") t order by createdat {query.order} LIMIT {query.limit} OFFSET {query.offset}"
+        projects_list = []
+        print(sql)
+        with engine.connect() as conn:
+            result = conn.execute(text(sql))
+            for row in result:
+                projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count,"id":row.id})
+        response.status_code = 200
+        return projects_list
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
+@app.get("/projects/{id}")
+async def get_project(id:Annotated[int,Path()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        project={}
+        count = 0
+        with engine.connect() as conn:
+            result = conn.execute(text(f"SELECT name,description,createdat,status,ownerid from projects where id = '{id}'"))
+            for row in result:
+                if row.ownerid!=payload["id"]:
+                    response.status_code = 401
+                    return {"message":"Unauthorized access!"}
+                else:
+                    project = {"name": row.name, "description": row.description, "createdat": row.createdat,"status": row.status}
+                    count+=1
+        if count>0:
+            print(project)
+            response.status_code = 200
+            return project
+        else:
+            response.status_code = 404
+            return {"message":"Project not found!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
 
 
 
 
+@app.put("/projects/{id}")
+async def update_project(id:Annotated[int,Path()],request: Request,response: Response,project:Annotated[Project,Body()]):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"update projects set name = '{project.name}',description='{project.description}', status='{project.status}' where id = {id} and ownerid = {payload['id']}"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Project updated!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
 
 
 
-@app.post("/create_task")
-async def create_task(task: Task):
-    if task.parentId is not None and CheckCircular(task.id,task.parentId) == True:
-        return "Invalid parent"
-    tasks.append(task)
-    return task
+
+@app.delete("/projects/{id}")
+async def delete_project(id:Annotated[int,Path()],request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"delete from projects where id = {id} and ownerid = {payload['id']}"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Project deleted!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+@app.post("/tasks")
+async def create_task(task:Annotated[Task, Body()],request:Request,response: Response):
+    authorization=request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    sql=""
+    if "description" in task.model_fields_set:
+        sql=f"INSERT INTO tasks (title, description, priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.description}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
+    else:
+        sql=f"INSERT INTO tasks (title,  priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
+    count=0
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            result = conn.execute(text(f"SELECT name from projects where id = '{task.projectId}' and ownerid = {payload['id']}"))
+            for row in result:
+                count=1
+        if count>0:
+            with engine.connect() as conn:
+                conn.execute(text(sql))
+                conn.commit()
+            response.status_code = 200
+            return {"message": "task created!"}
+        else:
+            response.status_code = 401
+            return {"message": "Unauthorized request!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+@app.get("/tasks")
+async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request: Request):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        count=0
+        with engine.connect() as conn:
+            result=conn.execute(text(f"select * from projects where id = {query.projectId} and ownerid = {payload['id']}"))
+            for row in result:
+                count=1
+        if count>0:
+            count=0
+            sql="select t.*, COUNT(*) OVER() AS total_count from(select * from tasks where "
+            if 'title' in query.model_fields_set:
+                sql+=f"title LIKE '%{query.title}%' "
+                count+=1
+            if 'status' in query.model_fields_set and count>0:
+                sql+=f" and status='{query.status}' "
+            elif 'status' in query.model_fields_set and count==0:
+                sql+=f"status='{query.status}' "
+                count+=1
+            if 'priority' in query.model_fields_set and count>0:
+                sql+=f" and priority='{query.priority}' "
+            elif 'priority' in query.model_fields_set and count==0:
+                sql+=f"priority='{query.priority}' "
+                count+=1
+            if count>0:
+                sql+=f"and projectId={query.projectId} "
+            else:
+                sql+=f"projectId={query.projectId} "
+            sql+=f") t order by dueDate {query.order} LIMIT {query.limit} OFFSET {query.offset}"
+            tasks_list = []
+            print(sql)
+            with engine.connect() as conn:
+                result = conn.execute(text(sql))
+                for row in result:
+                    tasks_list.append({"title":row.title,"description":row.description,"status":row.status,"priority":row.priority,"duedate":row.duedate,"limit":row.total_count,"id":row.id})
+            response.status_code = 200
+            return tasks_list
+        else:
+            response.status_code = 401
+            return {"message": "Unauthorized request!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
