@@ -52,26 +52,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
-def CheckCircular(child,parent):
-    circular=False
-    ids=[]
-    while child not in ids and parent is not None:
-        ids.append(child)
-        check=False
-        for i in tasks:
-            if i.id==parent:
-                check=True
-                child=i.id
-                parent= i.parentId
-        if check==False:
-            circular=True
-            break
-    if parent!=None:
-        circular=True
-    return circular
 ALGORITHM = "HS256"
+
+def CheckCirucular(id,pid):
+    circular=False
+    ids=[id]
+    with engine.connect() as conn:
+        while pid:
+            result = conn.execute(text(f"SELECT id,parentid from tasks where id = {pid}")).first()
+            id=result.id
+            if id in ids:
+                circular=True
+                break
+            else:
+                ids.append(id)
+                pid=result.parentid
+    return circular
 
 
 
@@ -263,6 +259,7 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         else:
             expired_tokens.append(authorization)
             with engine.connect() as conn:
+                conn.execute(text(f"delete from tasks where projectid in (select id from projects where ownerid={id})"))
                 conn.execute(text(f"delete from projects where ownerid = {id}"))
                 conn.execute(text(f"delete from users where id = {id}"))
                 conn.commit()
@@ -279,9 +276,15 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
 async def create_project(project:Annotated[Project, Body()],request:Request,response: Response):
     authorization=request.headers.get("Authorization")
     payload = verifyJWT(authorization)
+    sql=""
+    if "description" in project.model_fields_set:
+        sql=f"insert into projects(name,description,status,ownerId) values('{project.name}','{project.description}','{project.status}',{payload['id']})"
+    else:
+        sql=f"insert into projects(name,status,ownerId) values('{project.name}','{project.status}',{payload['id']})"
+
     if "error" not in payload.keys():
         with engine.connect() as conn:
-            conn.execute(text(f"insert into projects(name,description,status,ownerId) values('{project.name}','{project.description}','{project.status}',{payload['id']})"))
+            conn.execute(text(sql))
             conn.commit()
         response.status_code = 200
         return {"message": "Project created!"}
@@ -359,9 +362,14 @@ async def get_project(id:Annotated[int,Path()],request: Request,response: Respon
 async def update_project(id:Annotated[int,Path()],request: Request,response: Response,project:Annotated[Project,Body()]):
     authorization = request.headers.get("Authorization")
     payload = verifyJWT(authorization)
+    sql = ""
+    if "description" in project.model_fields_set:
+        sql = f"update projects set name = '{project.name}',description='{project.description}', status='{project.status}' where id = {id} and ownerid = {payload['id']}"
+    else:
+        sql = f"update projects set name = '{project.name}',description=null, status='{project.status}' where id = {id} and ownerid = {payload['id']}"
     if "error" not in payload.keys():
         with engine.connect() as conn:
-            conn.execute(text(f"update projects set name = '{project.name}',description='{project.description}', status='{project.status}' where id = {id} and ownerid = {payload['id']}"))
+            conn.execute(text(sql))
             conn.commit()
         response.status_code = 200
         return {"message": "Project updated!"}
@@ -378,6 +386,7 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
     payload = verifyJWT(authorization)
     if "error" not in payload.keys():
         with engine.connect() as conn:
+            conn.execute(text(f"delete from tasks where projectid={id} and (select count(*) from projects where id={id} and ownerid={payload['id']})=1 "))
             conn.execute(text(f"delete from projects where id = {id} and ownerid = {payload['id']}"))
             conn.commit()
         response.status_code = 200
@@ -391,11 +400,15 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
 async def create_task(task:Annotated[Task, Body()],request:Request,response: Response):
     authorization=request.headers.get("Authorization")
     payload = verifyJWT(authorization)
-    sql=""
+    sql=f"INSERT INTO tasks (title,  priority, status, dueDate, projectId, createdBy"
+    sql2=f") VALUES ('{task.title}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']}"
     if "description" in task.model_fields_set:
-        sql=f"INSERT INTO tasks (title, description, priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.description}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
-    else:
-        sql=f"INSERT INTO tasks (title,  priority, status, dueDate, projectId, createdBy) VALUES ('{task.title}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']})"
+        sql+=f",description"
+        sql2+=f",'{task.description}'"
+    if "parentId" in task.model_fields_set:
+        sql+=f",parentId"
+        sql2+=f",{task.parentId}"
+    sql=sql+sql2+") "
     count=0
     if "error" not in payload.keys():
         with engine.connect() as conn:
@@ -448,7 +461,6 @@ async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request
                 sql+=f"projectId={query.projectId} "
             sql+=f") t order by dueDate {query.order} LIMIT {query.limit} OFFSET {query.offset}"
             tasks_list = []
-            print(sql)
             with engine.connect() as conn:
                 result = conn.execute(text(sql))
                 for row in result:
@@ -476,7 +488,6 @@ async def get_task(id:Annotated[int,Path()],request: Request,response: Response)
                 task = {"title": row.title, "description": row.description, "duedate": row.duedate,"status": row.status,"priority": row.priority,"parentname": row.parent_title,"parentid":row.parentid}
                 count+=1
         if count>0:
-            print(task)
             response.status_code = 200
             return task
         else:
@@ -495,7 +506,6 @@ async def search_parent(id:Annotated[int,Path()],projectid:Annotated[int,Query()
         count=0
         with engine.connect() as conn:
             sql=f"select title,id from tasks where id!={id} and projectid={projectid} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1 and title like '%{title}%' limit 5 offset 0"
-            print(sql)
             result = conn.execute(text(sql))
             for row in result:
                 tasks.append({"title":row.title,"id":row.id})
@@ -522,6 +532,9 @@ async def update_task(id:Annotated[int,Path()],request: Request,response: Respon
         else:
             sql += f",description = null"
         if "parentId" in task.model_fields_set and task.parentId:
+            if CheckCirucular(id,task.parentId):
+                response.status_code = 422
+                return {"message": "Circular parent relation!"}
             print("YESSS")
             sql+=f",parentid = {task.parentId}"
         else:
@@ -533,6 +546,23 @@ async def update_task(id:Annotated[int,Path()],request: Request,response: Respon
             conn.commit()
         response.status_code = 200
         return {"message": "Task updated!"}
+    else:
+        response.status_code = 401
+        return {"message": "Invalid token"}
+
+
+
+@app.delete("/tasks/{id}")
+async def delete_project(id:Annotated[int,Path()],request: Request,response: Response,projectid:Annotated[int,Query()]):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            conn.execute(text(f"update tasks set parentid = null where parentid={id} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1"))
+            conn.execute(text(f"delete from tasks where id = {id} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1"))
+            conn.commit()
+        response.status_code = 200
+        return {"message": "Task deleted!"}
     else:
         response.status_code = 401
         return {"message": "Invalid token"}
