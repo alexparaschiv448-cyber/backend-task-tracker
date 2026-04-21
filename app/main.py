@@ -566,3 +566,60 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
     else:
         response.status_code = 401
         return {"message": "Invalid token"}
+
+
+
+@app.get("/dashboard/statuses")
+async def get_statuses(request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            result=conn.execute(text(f"select * from projects where ownerid={payload['id']}")).first()
+            if not result:
+                response.status_code=401
+                return {"message": "Unauthorized request!"}
+            result=conn.execute(text(f"SELECT p.id,p.name,COUNT(t.id) FILTER (WHERE t.status = 'New') AS new_count,COUNT(t.id) FILTER (WHERE t.status = 'In Progress') AS in_progress_count,COUNT(t.id) FILTER (WHERE t.status = 'Done') AS done_count FROM projects p LEFT JOIN tasks t ON t.projectid = p.id WHERE p.ownerid = {payload['id']} GROUP BY p.id, p.name ORDER BY p.name;"))
+            response.status_code=200
+            statuses=[]
+            for row in result:
+                statuses.append({"name":row.name,"new":row.new_count,"in_progress":row.in_progress_count,"done":row.done_count})
+            return statuses
+
+
+
+@app.get("/dashboard/priorities")
+async def get_priorities(request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            result=conn.execute(text(f"select * from projects where ownerid={payload['id']}")).first()
+            if not result:
+                response.status_code=401
+                return {"message": "Unauthorized request!"}
+            result=conn.execute(text(f"SELECT COUNT(t.id) FILTER (WHERE t.priority = '0 - Highest' and t.status!='Done') AS highest_count, COUNT(t.id) FILTER (WHERE t.priority = '1 - High' and t.status!='Done') AS high_count, COUNT(t.id) FILTER (WHERE t.priority = '2 - Medium' and t.status!='Done') AS medium_count, COUNT(t.id) FILTER (WHERE t.priority = '3 - Low' and t.status!='Done') AS low_count, COUNT(t.id) FILTER (WHERE t.priority = '4 - Lowest' and t.status!='Done') AS lowest_count FROM tasks t  WHERE t.createdby = {payload['id']} "))
+            response.status_code=200
+            priorities=[]
+            for row in result:
+                priorities.append({"highest":row.highest_count,"high":row.high_count,"medium":row.medium_count,"low":row.low_count,"lowest":row.lowest_count})
+            return priorities
+
+
+
+
+
+@app.get("/dashboard/summary")
+async def get_summary(request: Request,response: Response):
+    authorization = request.headers.get("Authorization")
+    payload = verifyJWT(authorization)
+    if "error" not in payload.keys():
+        with engine.connect() as conn:
+            summary={}
+            result = conn.execute(text(f"select count(id) as task_count from tasks where createdby={payload['id']}")).first()
+            summary["task_count"] = result.task_count
+            result= conn.execute(text(f"select count(id) as project_count from projects where ownerid={payload['id']}")).first()
+            summary["project_count"] = result.project_count
+            response.status_code = 200
+            print(summary)
+            return summary
