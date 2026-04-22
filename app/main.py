@@ -579,7 +579,7 @@ async def get_statuses(request: Request,response: Response):
             if not result:
                 response.status_code=401
                 return {"message": "Unauthorized request!"}
-            result=conn.execute(text(f"SELECT p.id,p.name,COUNT(t.id) FILTER (WHERE t.status = 'New') AS new_count,COUNT(t.id) FILTER (WHERE t.status = 'In Progress') AS in_progress_count,COUNT(t.id) FILTER (WHERE t.status = 'Done') AS done_count FROM projects p LEFT JOIN tasks t ON t.projectid = p.id WHERE p.ownerid = {payload['id']} GROUP BY p.id, p.name ORDER BY p.name;"))
+            result=conn.execute(text(f"SELECT p.id,p.name,COUNT(t.id) FILTER (WHERE t.status = 'New') AS new_count,COUNT(t.id) FILTER (WHERE t.status = 'In Progress') AS in_progress_count,COUNT(t.id) FILTER (WHERE t.status = 'Done') AS done_count FROM projects p LEFT JOIN tasks t ON t.projectid = p.id WHERE p.ownerid = {payload['id']} GROUP BY p.id, p.name ORDER BY p.createdat DESC;"))
             response.status_code=200
             statuses=[]
             for row in result:
