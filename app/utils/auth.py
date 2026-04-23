@@ -2,6 +2,7 @@ import jwt
 from datetime import datetime, timedelta,timezone
 from app.models.LoginResponse import LoginResponse
 from dotenv import load_dotenv
+from fastapi.responses import JSONResponse
 import os
 
 
@@ -24,6 +25,6 @@ def verifyJWT(authorization: str):
 
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
 
-        return payload
+        return {"data":payload,"message":"Valid authorization!","code":"AUTHORIZED"}
     except:
-        return {"error":"Invalid token!"}
+        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
