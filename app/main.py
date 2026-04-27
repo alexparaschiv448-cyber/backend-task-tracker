@@ -30,7 +30,7 @@ engine = create_engine(
     db_connection
 )
 
-
+status={200:["CREATED","RETURNED","UPDATED","DELETED","AUTHORIZED"],404:"NOT_FOUND",401:"UNAUTHORIZED",403:"FORBIDDEN",422:"BAD_REQUEST"}
 
 app = FastAPI()
 
@@ -81,18 +81,18 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        response = JSONResponse({"message": "No auth header","code":"UNAUTHORIZED"}, status_code=401)
+        response = JSONResponse({"message": "No auth header","code":status[401]}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
     payload = verifyJWT(auth_header)
-    if  payload['code']=="UNAUTHORIZED":
-        response=JSONResponse({"message": "Token Expired","code":"UNAUTHORIZED"}, status_code=401)
+    if  payload['code']==status[401]:
+        response=JSONResponse({"message": "Token Expired","code":status[401]}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
     if auth_header in expired_tokens:
-        response = JSONResponse({"message": "Token Expired","code":"UNAUTHORIZED"}, status_code=401)
+        response = JSONResponse({"message": "Token Expired","code":status[401]}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
@@ -111,9 +111,9 @@ async def checkemail(email: Annotated[str,Path(pattern = r"^[^\s@]+@[^\s@]+$")])
         for row in result:
             count += 1
         if count>0:
-            return {"unique": False,"message":"Existing email!","code":"INVALID_EMAIL"}
+            return {"unique": False,"message":"Existing email!","code":status[200][1]}
         else:
-            return {"unique": True,"message":"Unique email!","code":"VALID_EMAIL"}
+            return {"unique": True,"message":"Unique email!","code":status[200][1]}
 
 
 
@@ -130,7 +130,7 @@ async def create_user(user: User,response: Response):
         for row in result:
             id=row[0]
             createdat=row[1]
-    return {"data":createJWT({"id":id,"createdat":createdat, "firstname":user.firstName,"lastname":user.lastName,"email":user.email}),"code":"ACCOUNT_CREATED","message":"Account created successfully!"}
+    return {"data":createJWT({"id":id,"createdat":createdat, "firstname":user.firstName,"lastname":user.lastName,"email":user.email}),"code":status[200][0],"message":"Account created successfully!"}
 
 
 
@@ -152,10 +152,10 @@ async def create_user(login:Annotated[LoginRequest,Body()],response: Response):
             createdat=row[3]
             count+=1
         if count>0:
-            return {"data":createJWT({"id":id,"createdat":createdat, "firstname":firstname,"lastname":lastname,"email":login.email}),"code":"AUTHORIZED","message":"Successfully logged in!"}
+            return {"data":createJWT({"id":id,"createdat":createdat, "firstname":firstname,"lastname":lastname,"email":login.email}),"code":status[200][4],"message":"Successfully logged in!"}
         else:
             response.status_code=404
-            return {"message":"Invalid credentials!","code":"NOT_FOUND"}
+            return {"message":"Invalid credentials!","code":status[404]}
 
 
 
@@ -182,7 +182,7 @@ async def update_user(user:Annotated[UpdateUserRequest,Body()],id:Annotated[int,
         print(id,payload["id"])
         if id!=payload["id"]:
             response.status_code = 403
-            return {"message":"Forbidden request!","code":"FORBIDDEN"}
+            return {"message":"Forbidden request!","code":status[403]}
         else:
             createdat = ''
             with engine.connect() as conn:
@@ -194,10 +194,10 @@ async def update_user(user:Annotated[UpdateUserRequest,Body()],id:Annotated[int,
             if createdat=="":
                 createdat=datetime.now()
             expired_tokens.append(authorization)
-            return {"data":createJWT({"id":id,"createdat":createdat, "firstname":user.firstname,"lastname":user.lastname,"email":user.email}),"message":"Account updated!","code":"USER_UPDATED"}
+            return {"data":createJWT({"id":id,"createdat":createdat, "firstname":user.firstname,"lastname":user.lastname,"email":user.email}),"message":"Account updated!","code":status[200][2]}
     else:
         response.status_code=401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -211,7 +211,7 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
         print(id,payload["id"])
         if id!=payload["id"]:
             response.status_code = 403
-            return {"message":"Forbidden request!","code":"FORBIDDEN"}
+            return {"message":"Forbidden request!","code":status[403]}
         else:
             expired_tokens.append(authorization)
             with engine.connect() as conn:
@@ -220,10 +220,10 @@ async def delete_user(id:Annotated[int,Path()],request:Request,response: Respons
                 conn.execute(text(f"delete from users where id = {id}"))
                 conn.commit()
             response.status_code = 200
-            return {"message":"Account deleted!","code":"USER_DELETED"}
+            return {"message":"Account deleted!","code":status[200][3]}
     else:
         response.status_code=401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -243,10 +243,10 @@ async def create_project(project:Annotated[Project, Body()],request:Request,resp
             conn.execute(text(sql))
             conn.commit()
         response.status_code = 200
-        return {"message":"Project created!","code":"PROJECT_CREATED"}
+        return {"message":"Project created!","code":status[200][0]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -279,13 +279,13 @@ async def get_projects(query:Annotated[GetProjects,Query()],response: Response,r
                 projects_list.append({"name":row.name,"description":row.description,"status":row.status,"creation_date":row.createdat,"limit":row.total_count,"id":row.id})
         if len(projects_list)>0:
             response.status_code = 200
-            return {"data":projects_list,"message":"Project list returned!","code":"PROJECTS_RETURNED"}
+            return {"data":projects_list,"message":"Project list returned!","code":status[200][1]}
         else:
             response.status_code=404
-            return {"message":"No projects found!","code":"NOT_FOUND"}
+            return {"message":"No projects found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -302,19 +302,19 @@ async def get_project(id:Annotated[int,Path()],request: Request,response: Respon
             for row in result:
                 if row.ownerid!=payload["id"]:
                     response.status_code = 403
-                    return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                    return {"message":"Forbidden request!","code":status[403]}
                 else:
                     project = {"name": row.name, "description": row.description, "createdat": row.createdat,"status": row.status}
                     count+=1
         if count>0:
             response.status_code = 200
-            return {"data":project,"message":"Project found!","code":"PROJECT_FOUND"}
+            return {"data":project,"message":"Project found!","code":status[200][1]}
         else:
             response.status_code = 404
-            return {"message":"Project not found!","code":"NOT_FOUND"}
+            return {"message":"Project not found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -329,7 +329,7 @@ async def update_project(id:Annotated[int,Path()],request: Request,response: Res
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={id}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         sql = ""
         if "description" in project.model_fields_set:
             sql = f"update projects set name = '{project.name}',description='{project.description}', status='{project.status}' where id = {id} and ownerid = {payload['id']}"
@@ -339,10 +339,10 @@ async def update_project(id:Annotated[int,Path()],request: Request,response: Res
             conn.execute(text(sql))
             conn.commit()
         response.status_code = 200
-        return {"message":"Project updated!","code":"PROJECT_UPDATED"}
+        return {"message":"Project updated!","code":status[200][2]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -357,16 +357,16 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
             result = conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={id}")).first()
             if result:
                 response.status_code = 403
-                return {"message": "Forbidden request!", "code": "FORBIDDEN"}
+                return {"message": "Forbidden request!", "code": status[403]}
         with engine.connect() as conn:
             conn.execute(text(f"delete from tasks where projectid={id} and (select count(*) from projects where id={id} and ownerid={payload['id']})=1 "))
             conn.execute(text(f"delete from projects where id = {id} and ownerid = {payload['id']}"))
             conn.commit()
         response.status_code = 200
-        return {"message":"Project deleted!","code":"PROJECT_DELETED"}
+        return {"message":"Project deleted!","code":status[200][3]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 @app.post("/tasks")
@@ -379,7 +379,7 @@ async def create_task(task:Annotated[Task, Body()],request:Request,response: Res
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={task.projectId}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         sql=f"INSERT INTO tasks (title,  priority, status, dueDate, projectId, createdBy"
         sql2=f") VALUES ('{task.title}','{task.priority}','{task.status}','{task.dueDate}',{task.projectId},{payload['id']}"
         if "description" in task.model_fields_set:
@@ -399,13 +399,13 @@ async def create_task(task:Annotated[Task, Body()],request:Request,response: Res
                 conn.execute(text(sql))
                 conn.commit()
             response.status_code = 200
-            return {"message":"Task created!","code":"TASK_CREATED"}
+            return {"message":"Task created!","code":status[200][0]}
         else:
             response.status_code = 404
-            return {"message":"Project not found!","code":"NOT_FOUND"}
+            return {"message":"Project not found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 @app.get("/tasks")
@@ -418,7 +418,7 @@ async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={query.projectId}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         count=0
         with engine.connect() as conn:
             result=conn.execute(text(f"select * from projects where id = {query.projectId} and ownerid = {payload['id']}"))
@@ -452,16 +452,16 @@ async def get_tasks(query:Annotated[GetTasks,Query()],response: Response,request
                     tasks_list.append({"title":row.title,"description":row.description,"status":row.status,"priority":row.priority,"duedate":row.duedate,"limit":row.total_count,"id":row.id,"projectid":row.projectid})
             if len(tasks_list)>0:
                 response.status_code = 200
-                return {"data":tasks_list,"message":"Task list returned!","code":"TASKS_RETURNED"}
+                return {"data":tasks_list,"message":"Task list returned!","code":status[200][1]}
             else:
                 response.status_code=404
-                return {"message":"No tasks found!","code":"NOT_FOUND"}
+                return {"message":"No tasks found!","code":status[404]}
         else:
             response.status_code = 404
-            return {"message":"No projects found!","code":"NOT_FOUND"}
+            return {"message":"No projects found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 @app.get("/tasks/{id}")
@@ -479,7 +479,7 @@ async def get_task(id:Annotated[int,Path()],request: Request,response: Response)
                 result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={projectid}")).first()
                 if result:
                     response.status_code=403
-                    return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                    return {"message":"Forbidden request!","code":status[403]}
         task={}
         count = 0
         with engine.connect() as conn:
@@ -489,13 +489,13 @@ async def get_task(id:Annotated[int,Path()],request: Request,response: Response)
                 count+=1
         if count>0:
             response.status_code = 200
-            return {"data":task,"message":"Task returned!","code":"TASK_RETURNED"}
+            return {"data":task,"message":"Task returned!","code":status[200][1]}
         else:
             response.status_code = 404
-            return {"message":"No task found!","code":"NOT_FOUND"}
+            return {"message":"No task found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 @app.get("/search/parent/{id}")
 async def search_parent(id:Annotated[int,Path()],projectid:Annotated[int,Query()],title:Annotated[str,Query()],request: Request,response: Response):
@@ -507,7 +507,7 @@ async def search_parent(id:Annotated[int,Path()],projectid:Annotated[int,Query()
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={projectid}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         tasks=[]
         count=0
         with engine.connect() as conn:
@@ -518,13 +518,13 @@ async def search_parent(id:Annotated[int,Path()],projectid:Annotated[int,Query()
                 count=1
         if count>0:
             response.status_code=200
-            return {"data":tasks,"message":"Parent returned!","code":"PARENT_RETURNED"}
+            return {"data":tasks,"message":"Parent returned!","code":status[200][1]}
         else:
             response.status_code=404
-            return {"message":"No parent found!","code":"NOT_FOUND"}
+            return {"message":"No parent found!","code":status[404]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 @app.put("/tasks/{id}")
@@ -537,7 +537,7 @@ async def update_task(id:Annotated[int,Path()],request: Request,response: Respon
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={task.projectId}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         sql=f"update tasks set title = '{task.title}', status='{task.status}', priority='{task.priority}', duedate='{task.dueDate}'"
         if "description" in task.model_fields_set and task.description:
             sql+=f",description = '{task.description}'"
@@ -546,7 +546,7 @@ async def update_task(id:Annotated[int,Path()],request: Request,response: Respon
         if "parentId" in task.model_fields_set and task.parentId:
             if CheckCirucular(id,task.parentId):
                 response.status_code = 422
-                return {"message":"Invalid parent id! Choose another parent","code":"BAD_REQUEST"}
+                return {"message":"Invalid parent id! Choose another parent","code":status[422]}
             print("YESSS")
             sql+=f",parentid = {task.parentId}"
         else:
@@ -557,10 +557,10 @@ async def update_task(id:Annotated[int,Path()],request: Request,response: Respon
             conn.execute(text(sql))
             conn.commit()
         response.status_code = 200
-        return {"message":"Task updated!","code":"TASK_UPDATED"}
+        return {"message":"Task updated!","code":status[200][2]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -574,16 +574,16 @@ async def delete_project(id:Annotated[int,Path()],request: Request,response: Res
             result=conn.execute(text(f"select * from projects where ownerid != {payload['id']} and id={projectid}")).first()
             if result:
                 response.status_code=403
-                return {"message":"Forbidden request!","code":"FORBIDDEN"}
+                return {"message":"Forbidden request!","code":status[403]}
         with engine.connect() as conn:
             conn.execute(text(f"update tasks set parentid = null where parentid={id} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1"))
             conn.execute(text(f"delete from tasks where id = {id} and (select count(*) from projects where id={projectid} and ownerid={payload['id']})=1"))
             conn.commit()
         response.status_code = 200
-        return {"message":"Task deleted!","code":"TASK_DELETED"}
+        return {"message":"Task deleted!","code":status[200][3]}
     else:
         response.status_code = 401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -595,14 +595,18 @@ async def get_statuses(request: Request,response: Response):
         payload = payload["data"]
         with engine.connect() as conn:
             result=conn.execute(text(f"SELECT p.id,p.name,COUNT(t.id) FILTER (WHERE t.status = 'New') AS new_count,COUNT(t.id) FILTER (WHERE t.status = 'In Progress') AS in_progress_count,COUNT(t.id) FILTER (WHERE t.status = 'Done') AS done_count FROM projects p LEFT JOIN tasks t ON t.projectid = p.id WHERE p.ownerid = {payload['id']} GROUP BY p.id, p.name ORDER BY p.createdat DESC;"))
-            response.status_code=200
             statuses=[]
             for row in result:
                 statuses.append({"name":row.name,"new":row.new_count,"in_progress":row.in_progress_count,"done":row.done_count})
-            return {"data":statuses,"message":"Statuses returned!","code":"RETURNED"}
+            if len(statuses)>0:
+                response.status_code = 200
+                return {"data":statuses,"message":"Statuses returned!","code":status[200][1]}
+            else:
+                response.status_code = 404
+                return {"message":"No statuses found!","code":status[404]}
     else:
         response.status_code=401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -614,15 +618,18 @@ async def get_priorities(request: Request,response: Response):
         payload = payload["data"]
         with engine.connect() as conn:
             result=conn.execute(text(f"SELECT COUNT(t.id) FILTER (WHERE t.priority = '0 - Highest' and t.status!='Done') AS highest_count, COUNT(t.id) FILTER (WHERE t.priority = '1 - High' and t.status!='Done') AS high_count, COUNT(t.id) FILTER (WHERE t.priority = '2 - Medium' and t.status!='Done') AS medium_count, COUNT(t.id) FILTER (WHERE t.priority = '3 - Low' and t.status!='Done') AS low_count, COUNT(t.id) FILTER (WHERE t.priority = '4 - Lowest' and t.status!='Done') AS lowest_count FROM tasks t  WHERE t.createdby = {payload['id']} "))
-            response.status_code=200
             priorities=[]
             for row in result:
                 priorities.append({"highest":row.highest_count,"high":row.high_count,"medium":row.medium_count,"low":row.low_count,"lowest":row.lowest_count})
-            return {"data":priorities,"message":"Priorities returned!","code":"RETURNED"}
-
+            if len(priorities)>0:
+                response.status_code = 200
+                return {"data":priorities,"message":"Priorities returned!","code":status[200][1]}
+            else:
+                response.status_code = 404
+                return {"message":"No priorities found!","code":status[404]}
     else:
         response.status_code=401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
 
 
 
@@ -640,8 +647,12 @@ async def get_summary(request: Request,response: Response):
             summary["task_count"] = result.task_count
             result= conn.execute(text(f"select count(id) as project_count from projects where ownerid={payload['id']}")).first()
             summary["project_count"] = result.project_count
-            response.status_code = 200
-            return {"data":summary,"message":"Summary returned!","code":"RETURNED"}
+            if summary["project_count"]>0:
+                response.status_code = 200
+                return {"data":summary,"message":"Summary returned!","code":status[200][1]}
+            else:
+                response.status_code=404
+                return {"message":"No projects found!","code":status[404]}
     else:
         response.status_code=401
-        return {"message":"Invalid authorization!","code":"UNAUTHORIZED"}
+        return {"message":"Invalid authorization!","code":status[401]}
