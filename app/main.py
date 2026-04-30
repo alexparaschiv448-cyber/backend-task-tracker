@@ -87,12 +87,12 @@ async def auth_middleware(request: Request, call_next):
         return response
     payload = verifyJWT(auth_header)
     if  payload['code']==status[401]:
-        response=JSONResponse({"message": "Token Expired","code":status[401]}, status_code=401)
+        response=JSONResponse({"message": "Unauthorized access!","code":status[401]}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
     if auth_header in expired_tokens:
-        response = JSONResponse({"message": "Token Expired","code":status[401]}, status_code=401)
+        response = JSONResponse({"message": "Unauthorized access!","code":status[401]}, status_code=401)
         response.headers["Access-Control-Allow-Origin"] = frontend_url
         response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
