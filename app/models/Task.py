@@ -1,16 +1,14 @@
 from pydantic import BaseModel,Field
 from typing import Literal
-from datetime import date
+from datetime import datetime
 
 
 
 class Task(BaseModel):
-    id:int
-    title: str = Field(min_length=1,max_length=100,description="Title")
-    description: str = Field(min_length=1,max_length=100,description="Description")
-    priority: int = Field(ge=0,le=5,description="Priority")
+    title: str = Field(min_length=1,max_length=50,description="Title")
+    description: str | None = Field(None,min_length=1,max_length=1000,description="Description")
+    priority:Literal["0 - Highest","1 - High","2 - Medium","3 - Low","4 - Lowest"]="4 - Lowest"
     status:Literal["New","In Progress","Done"]="New"
-    dueDate:date
+    dueDate:datetime
     parentId:int |None=None
     projectId:int
-    createdBy: str = Field(min_length=1,max_length=30,description="Created By User")
